@@ -143,25 +143,24 @@ class REST_Background_Processes_Controller extends REST_Controller {
 	 * @throws \Exception
 	 */
 	public function  bg_processes_permissions_check($request) { 
-        // TODO
-        return current_user_can('read');
+        return current_user_can('manage_tainacan');
 	}
 
     public function get_items( $request ) {
         global $wpdb;
 
-        $perpage = isset($request['perpage']) && is_numeric($request['perpage']) ? $request['perpage'] : 10;
+        $perpage = isset($request['perpage']) ? absint($request['perpage']) : 10;
         if ($perpage < 1) {
             $perpage = 1;
         }
-        $paged = isset($request['paged']) && is_numeric($request['paged']) ? $request['paged'] : 1;
+        $paged = isset($request['paged']) ? absint($request['paged']) : 1;
         if ($paged < 1) {
             $paged = 1;
         }
 
         $offset = ($paged - 1) * $perpage;
 
-        $limit_q = "LIMIT $offset,$perpage";
+        $limit_q = $wpdb->prepare("LIMIT %d, %d", $offset, $perpage);
 
         $user_q = $wpdb->prepare("AND user_id = %d", get_current_user_id());
         $status_q = "";
@@ -379,7 +378,7 @@ class REST_Background_Processes_Controller extends REST_Controller {
                 'error_message' => __('guid must be specified', 'tainacan' )
             ], 400);
         }
-        if (!is_user_logged_in() || !current_user_can('read') ) {
+        if (!is_user_logged_in() || !current_user_can('manage_tainacan') ) {
             $error_def = [
                 "code" => "unauthorized",
                 "message" => "Unauthorized",
@@ -388,11 +387,15 @@ class REST_Background_Processes_Controller extends REST_Controller {
             return new \WP_REST_Response($error_def, 403, array('content-type' => 'text/html; charset=utf-8'));
         }
 
-        $guid = $request['guid'];
+        $guid = basename($request['guid']);
         $upload_url = wp_upload_dir();
-        $path = realpath($upload_url['basedir'] . '/tainacan') . '/' . $guid;
+        $base_dir = realpath($upload_url['basedir'] . '/tainacan');
+        if ($base_dir === false) {
+            return new \WP_REST_Response("file not found", 404, array('content-type' => 'text/html; charset=utf-8'));
+        }
+        $path = $base_dir . '/' . $guid;
         $real_file_path = realpath($path);
-        if (strpos($real_file_path, $path) !== 0) {
+        if ($real_file_path === false || strpos($real_file_path, $base_dir . DIRECTORY_SEPARATOR) !== 0) {
             $error_def = [
                 "code" => "unauthorized_file_path",
                 "message" => "Unauthorized file path",
@@ -405,10 +408,10 @@ class REST_Background_Processes_Controller extends REST_Controller {
 
             $finfo = @finfo_open(FILEINFO_MIME_TYPE);
             $mime_type = @finfo_file($finfo, $path);
-            $file_name = @basename($path);
+            $file_name = sanitize_file_name(@basename($path));
             http_response_code(200);
             header('Content-Description: File Transfer');
-            header("Content-Disposition: attachment; filename=$file_name"); 
+            header('Content-Disposition: attachment; filename="' . $file_name . '"'); 
             header("Content-Type: $mime_type");
             header("Content-Length: " . @filesize( $path ));
             if (\ob_get_level() > 0) {
